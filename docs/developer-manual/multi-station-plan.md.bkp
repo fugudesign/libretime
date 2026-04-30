@@ -1,0 +1,327 @@
+# Plan d'implémentation : Support Multi-Stations
+
+## Contexte
+
+LibreTime, dans sa version actuelle, ne gère qu'une seule station radio : un unique pipeline
+audio (Liquidsoap) est généré, alimenté par un seul calendrier de programmation, et diffusé
+vers une ou plusieurs sorties Icecast/Shoutcast qui diffusent **toutes le même flux**.
+
+L'objectif de cette évolution est de permettre de gérer **N stations indépendantes** au sein
+d'une même instance LibreTime, chacune ayant :
+- Sa propre programmation (shows, schedules)
+- Son propre pipeline Liquidsoap (queues, live inputs)
+- Ses propres sorties Icecast (mounts distincts)
+- Tout en **partageant** la bibliothèque audio, les playlists et les smart blocks
+
+---
+
+## Architecture cible
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  LibreTime (instance unique)                                     │
+│                                                                  │
+│  Base de données                                                 │
+│  ├── cc_stations (nouvelle table)                                │
+│  │     id | name | description | color | is_default             │
+│  └── cc_show  ──→  station_id (FK → cc_stations)                │
+│                                                                  │
+│  API Django  (/api/v2/stations/)                                 │
+│                                                                  │
+│  Playout Python                                                  │
+│  ├── Fetch schedule filtré par station                           │
+│  ├── Pipeline Station A  ──→  queues s0..s3 "station_a_sN"      │
+│  └── Pipeline Station B  ──→  queues s0..s3 "station_b_sN"      │
+│                                                                  │
+│  Liquidsoap (processus unique, N pipelines parallèles)          │
+│  ├── station_a: switch → harbor_main_a / harbor_show_a / queue_a│
+│  └── station_b: switch → harbor_main_b / harbor_show_b / queue_b│
+│       │                          │                              │
+│       ▼                          ▼                              │
+│  Icecast: /radio-a           Icecast: /radio-b                  │
+│                                                                  │
+│  UI Legacy PHP                                                   │
+│  ├── Page /stations (CRUD stations)                              │
+│  ├── Sélecteur de station dans le header (session)              │
+│  └── Calendrier filtré par station active                        │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Fichiers clés impactés
+
+| Composant | Fichiers |
+|-----------|---------|
+| **DB / migrations** | `api/libretime_api/legacy/migrations/0047_add_stations.py` (nouveau) |
+| **Modèles Django** | `api/libretime_api/schedule/models/station.py` (nouveau), `show.py` |
+| **API Django** | `api/libretime_api/schedule/serializers/`, `views/`, `router.py` |
+| **Config partagée** | `shared/libretime_shared/config/_models.py` |
+| **Config dev** | `dev/config.yml` |
+| **Playout** | `playout/libretime_playout/player/schedule.py`, `push.py`, `liquidsoap.py` |
+| **Liquidsoap scripts** | `playout/libretime_playout/liquidsoap/2.1/ls_script.liq`, `ls_lib.liq` |
+| **Templates Jinja2** | `playout/libretime_playout/liquidsoap/templates/entrypoint.liq.j2` |
+| **Liquidsoap entrypoint** | `playout/libretime_playout/liquidsoap/entrypoint.py`, `models.py` |
+| **UI Legacy** | `legacy/application/controllers/ScheduleController.php`, `ShowbuilderController.php` |
+| **UI Legacy modèles** | `legacy/application/models/Show.php`, `Schedule.php` |
+| **UI Legacy vues** | `legacy/application/views/scripts/schedule/` |
+| **UI Legacy forms** | `legacy/application/forms/AddShowForm.php` |
+| **Tests** | `shared/tests/config/models_test.py`, `api/libretime_api/schedule/tests/` |
+
+---
+
+## Phase 1 — Modèle de données
+
+> Fondation de tout le reste. Rien de fonctionnel cassé à cette étape.
+
+### 1.1 — Modèle `Station` Django
+
+Créer `api/libretime_api/schedule/models/station.py` :
+- Champs : `id`, `name` (255), `description` (8192, nullable), `color` (6, nullable), `is_default` (bool)
+- La station par défaut reçoit tous les shows existants lors de la migration
+- Exposer via `__init__.py` du module `models`
+
+### 1.2 — Relier `Show` → `Station`
+
+Dans `api/libretime_api/schedule/models/show.py` :
+- Ajouter `station = ForeignKey("schedule.Station", null=True, blank=True, on_delete=SET_NULL)`
+- `null=True` garantit la compatibilité avec les shows existants (ils héritent de la station par défaut via la migration)
+
+### 1.3 — Migration SQL legacy
+
+Créer `api/libretime_api/legacy/migrations/0047_add_stations.py` :
+```sql
+-- forward
+CREATE TABLE cc_stations (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description VARCHAR(8192),
+    color VARCHAR(6),
+    is_default BOOLEAN NOT NULL DEFAULT FALSE
+);
+INSERT INTO cc_stations (name, is_default) VALUES ('Default', TRUE);
+ALTER TABLE cc_show ADD COLUMN station_id INTEGER REFERENCES cc_stations(id) ON DELETE SET NULL;
+UPDATE cc_show SET station_id = (SELECT id FROM cc_stations WHERE is_default = TRUE);
+
+-- reverse
+ALTER TABLE cc_show DROP COLUMN IF EXISTS station_id;
+DROP TABLE IF EXISTS cc_stations;
+```
+
+### 1.4 — API CRUD stations
+
+- Serializer : `api/libretime_api/schedule/serializers/station.py`
+- ViewSet : `api/libretime_api/schedule/views/station.py` (lecture pour tous, écriture admin)
+- Enregistrement dans `router.py` : `/api/v2/stations/`
+
+### 1.5 — Adapter le serializer `Show`
+
+Exposer `station` (id) dans le serializer existant de `Show`.
+
+---
+
+## Phase 2 — Configuration multi-station
+
+> Étendre le format `config.yml` pour supporter N stations avec leurs propres I/O.
+
+### 2.1 — Nouveau modèle `StationStreamConfig`
+
+Dans `shared/libretime_shared/config/_models.py`, ajouter :
+
+```python
+class StationStreamConfig(BaseModel):
+    id: int          # doit correspondre à l'id en base
+    name: str
+    stream: StreamConfig
+```
+
+Et modifier `Config` (dans chaque composant) pour accepter :
+```yaml
+# dev/config.yml — nouveau format
+stations:
+  - id: 1
+    name: "Radio A"
+    stream:
+      inputs:
+        main: { mount: "main-a", port: 8001, secure: true }
+        show:  { mount: "show-a", port: 8002 }
+      outputs:
+        icecast:
+          - enabled: true
+            host: icecast
+            port: 8000
+            mount: radio-a.ogg
+            source_password: hackme
+            admin_password: hackme
+            audio: { format: ogg, bitrate: 256 }
+  - id: 2
+    name: "Radio B"
+    stream:
+      inputs:
+        main: { mount: "main-b", port: 8003 }
+        show:  { mount: "show-b", port: 8004 }
+      outputs:
+        icecast:
+          - enabled: true
+            host: icecast
+            port: 8000
+            mount: radio-b.mp3
+            source_password: hackme
+            admin_password: hackme
+            audio: { format: mp3, bitrate: 128 }
+```
+
+**Rétrocompatibilité** : si `stations` est absent, le système crée implicitement une station
+unique à partir du bloc `stream:` existant (comportement actuel préservé).
+
+### 2.2 — Ports Docker
+
+Pour N stations, il faut N×2 ports harbor (main + show). Mettre à jour
+`docker-compose.yml` et `docker-compose.override.yml` pour exposer les nouveaux ports.
+
+---
+
+## Phase 3 — Liquidsoap multi-pipeline
+
+> La partie la plus complexe. Un seul processus Liquidsoap, N pipelines indépendants.
+
+### 3.1 — Refactoriser `ls_script.liq` en macro par station
+
+Actuellement le script génère un pipeline unique (variable `s`). Il faut le transformer
+en une **fonction `create_station_pipeline(station_id)`** qui retourne une source `s_N`.
+
+Chaque pipeline station possède :
+- Ses 4 queues de lecture : `station_N_s0` .. `station_N_s3`
+- Son input harbor main : `harbor:input_main_N` (port/mount configurés)
+- Son input harbor show : `harbor:input_show_N`
+- Son switch de priorité : `s_N = switch([main, show, queue, default])`
+
+### 3.2 — Template `entrypoint.liq.j2`
+
+Boucler sur `config.stations` au lieu d'un pipeline unique :
+```jinja
+{% for station in config.stations %}
+{{ create_station_pipeline(station) }}
+{% endfor %}
+```
+
+### 3.3 — Template `outputs.liq.j2`
+
+Chaque output référence la source `s_N` de sa station :
+```jinja
+{% for station in config.stations %}
+  {% for output in station.stream.outputs.icecast %}
+    {{ output_icecast(loop.index, output, source="s_" + station.id|string) }}
+  {% endfor %}
+{% endfor %}
+```
+
+### 3.4 — Commandes serveur Liquidsoap
+
+Les commandes `queues.sX_skip`, `sources.start_schedule`, etc. doivent être
+**préfixées par station** : `station_N.queues.s0_skip`, `station_N.sources.start_schedule`, etc.
+
+### 3.5 — Client Liquidsoap Python
+
+Dans `playout/libretime_playout/player/liquidsoap.py` : toutes les méthodes qui envoient
+des commandes au serveur telnet Liquidsoap doivent accepter un `station_id` et préfixer
+les commandes en conséquence.
+
+---
+
+## Phase 4 — Playout Python multi-station
+
+> Adapter le process playout pour récupérer et router les schedules par station.
+
+### 4.1 — Filtrage du schedule par station
+
+Dans `player/schedule.py`, la fonction `get_schedule()` doit accepter un `station_id`
+et le passer comme paramètre à `api_client.list_schedule(params={..., "station": station_id})`.
+
+### 4.2 — Thread par station
+
+Dans `main.py`, au lieu d'instancier un seul `PypoFetch` + `PypoPush`, instancier
+**une paire par station** connue de la config, chacune avec son `station_id` et son
+client Liquidsoap préfixé.
+
+### 4.3 — Notifications RabbitMQ
+
+Les messages de notification (push schedule via RabbitMQ/legacy) doivent inclure
+un `station_id` pour router vers le bon thread.
+
+---
+
+## Phase 5 — Interface utilisateur Legacy PHP
+
+> L'UI existante en PHP/Zend est verbose mais suivre les patterns déjà en place la rend
+> maîtrisable.
+
+### 5.1 — Page de gestion des stations (`/stations`)
+
+Nouveau contrôleur `StationsController.php` avec :
+- Liste des stations (tableau)
+- Création / édition (nom, description, couleur)
+- Suppression (avec vérification : impossible si des shows y sont rattachés)
+
+### 5.2 — Sélecteur de station dans le header
+
+Dans le layout principal (`layouts/layout.phtml` ou équivalent) :
+- Dropdown "Station active" persisté en session (`Zend_Session_Namespace`)
+- Toutes les vues filtrent leurs données sur `$_SESSION['active_station_id']`
+
+### 5.3 — Calendrier filtré
+
+Dans `ScheduleController.php` :
+- Passer `station_id` dans toutes les requêtes de shows/instances
+- Le formulaire d'ajout de show (`AddShowForm.php`) pré-sélectionne la station active
+
+### 5.4 — Formulaire d'ajout/édition de show
+
+Dans `legacy/application/forms/AddShowForm.php` :
+- Ajouter un champ `station_id` (select, caché si une seule station)
+- Valeur par défaut = station active en session
+
+### 5.5 — Lien dans la navigation principale
+
+Ajouter un item "Stations" dans le menu de navigation
+(visible admins/gestionnaires seulement).
+
+---
+
+## Tests
+
+Les tests automatisés existants sont peu nombreux mais précis :
+
+- `shared/tests/config/models_test.py` : teste la validation de `StreamConfig`.
+  → **À mettre à jour** en Phase 2 pour tester `StationStreamConfig`.
+
+- `api/libretime_api/schedule/tests/` : tests Django des modèles et vues schedule.
+  → **À étendre** en Phase 1 pour tester les endpoints stations et le filtre par station.
+
+- `legacy/tests/` : tests PHP (PHPUnit).
+  → **À étendre** en Phase 5 pour les nouveaux contrôleurs/formulaires.
+
+Les tests existants **ne doivent pas régresser** à chaque phase.
+
+---
+
+## Contraintes et points d'attention
+
+1. **Rétrocompatibilité config** : le `config.yml` actuel (format `stream:` simple) doit
+   continuer à fonctionner. Le nouveau format `stations:` est optionnel/additionnel.
+
+2. **Migration sans perte** : les shows existants doivent automatiquement être attribués
+   à la station par défaut lors de la migration 0047.
+
+3. **Icecast unique** : le conteneur Icecast existant dans `docker-compose.yml` peut
+   gérer plusieurs mounts sans modification. Pas besoin de plusieurs Icecast.
+
+4. **Liquidsoap ports harbor** : chaque station nécessite 2 ports distincts (main + show).
+   Planifier l'allocation : station 1 → 8001/8002, station 2 → 8003/8004, etc.
+
+5. **Performances** : N pipelines Liquidsoap tournent en parallèle dans un seul processus.
+   Liquidsoap est mono-threadé, mais les sources sont asynchrones. Jusqu'à ~6 stations,
+   c'est sans problème sur un serveur standard.
+
+6. **UI : rôles** : la gestion des stations est réservée aux admins. Un "programmateur"
+   voit uniquement les shows de sa station active.

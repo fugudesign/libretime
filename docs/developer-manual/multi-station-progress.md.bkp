@@ -1,0 +1,88 @@
+# Suivi d'avancement — Multi-stations
+
+Référence : [Plan d'implémentation](./multi-station-plan.md)
+
+Légende : ✅ Terminé · 🔄 En cours · ⏳ À faire · ⛔ Bloqué
+
+---
+
+## Phase 1 — Modèle de données
+
+| # | Tâche | Statut | Notes |
+|---|-------|--------|-------|
+| 1.1 | Créer `api/libretime_api/schedule/models/station.py` | ⏳ | |
+| 1.2 | Exposer `Station` dans `models/__init__.py` | ⏳ | |
+| 1.3 | Ajouter FK `station` sur le modèle `Show` | ⏳ | `null=True` pour rétrocompat |
+| 1.4 | Créer migration SQL legacy `0047_add_stations.py` | ⏳ | Inclure INSERT station par défaut + UPDATE cc_show |
+| 1.5 | Créer serializer `station.py` | ⏳ | |
+| 1.6 | Créer viewset `station.py` | ⏳ | Lecture tous / écriture admin |
+| 1.7 | Enregistrer la route `/api/v2/stations/` dans `router.py` | ⏳ | |
+| 1.8 | Exposer `station` (id) dans le serializer `Show` | ⏳ | |
+| 1.9 | Tests : endpoints stations + filtre `show` par station | ⏳ | |
+
+---
+
+## Phase 2 — Configuration multi-station
+
+| # | Tâche | Statut | Notes |
+|---|-------|--------|-------|
+| 2.1 | Ajouter modèle `StationStreamConfig` dans `shared/libretime_shared/config/_models.py` | ⏳ | |
+| 2.2 | Modifier `Config` (playout, liquidsoap) pour accepter `stations:` | ⏳ | Rétrocompat `stream:` seul |
+| 2.3 | Mettre à jour `dev/config.yml` avec exemple 2 stations | ⏳ | |
+| 2.4 | Mettre à jour `docker/config.yml` et `docker/example/config.yml` | ⏳ | |
+| 2.5 | Exposer les nouveaux ports harbor dans `docker-compose.yml` | ⏳ | Station N → ports 8000+2N-1 / 8000+2N |
+| 2.6 | Mettre à jour les tests `shared/tests/config/models_test.py` | ⏳ | |
+
+---
+
+## Phase 3 — Liquidsoap multi-pipeline
+
+| # | Tâche | Statut | Notes |
+|---|-------|--------|-------|
+| 3.1 | Refactoriser `ls_script.liq` : extraire le pipeline en fonction `create_station_pipeline` | ⏳ | |
+| 3.2 | Préfixer toutes les variables/IDs par `station_N_` | ⏳ | queues, sources, switches |
+| 3.3 | Préfixer les commandes serveur telnet par station | ⏳ | `station_N.queues.s0_skip` etc. |
+| 3.4 | Adapter `ls_lib.liq` si nécessaire (helpers partagés) | ⏳ | |
+| 3.5 | Mettre à jour le template `entrypoint.liq.j2` pour boucler sur `config.stations` | ⏳ | |
+| 3.6 | Mettre à jour le template `outputs.liq.j2` pour référencer `s_N` par station | ⏳ | |
+| 3.7 | Mettre à jour `entrypoint.py` (Python) pour passer les stations au template | ⏳ | |
+| 3.8 | Tester la génération du script `.liq` avec 2 stations | ⏳ | Vérifier syntaxe Liquidsoap |
+| 3.9 | Tester le démarrage Liquidsoap avec 2 pipelines actifs | ⏳ | Via Docker |
+
+---
+
+## Phase 4 — Playout Python multi-station
+
+| # | Tâche | Statut | Notes |
+|---|-------|--------|-------|
+| 4.1 | Adapter `player/liquidsoap.py` : toutes les commandes acceptent un `station_id` | ⏳ | |
+| 4.2 | Adapter `player/schedule.py` : `get_schedule(station_id)` filtre l'API | ⏳ | |
+| 4.3 | Adapter `player/fetch.py` : passer `station_id` | ⏳ | |
+| 4.4 | Adapter `main.py` : instancier une paire `PypoFetch`+`PypoPush` par station | ⏳ | |
+| 4.5 | Adapter les notifications RabbitMQ pour inclure `station_id` | ⏳ | |
+| 4.6 | Tester la programmation et lecture simultanée de 2 stations | ⏳ | |
+
+---
+
+## Phase 5 — Interface utilisateur Legacy PHP
+
+| # | Tâche | Statut | Notes |
+|---|-------|--------|-------|
+| 5.1 | Créer `StationsController.php` (CRUD stations) | ⏳ | |
+| 5.2 | Créer les vues PHP correspondantes | ⏳ | Reprendre le style existant |
+| 5.3 | Ajouter sélecteur de station dans le header (session) | ⏳ | Dropdown dans le layout |
+| 5.4 | Filtrer les shows/instances dans `ScheduleController.php` par station active | ⏳ | |
+| 5.5 | Filtrer dans `ShowbuilderController.php` | ⏳ | |
+| 5.6 | Ajouter champ `station_id` dans `AddShowForm.php` | ⏳ | Caché si 1 station |
+| 5.7 | Ajouter item "Stations" dans la navigation (admins) | ⏳ | |
+| 5.8 | Tests PHPUnit nouveaux contrôleurs | ⏳ | |
+
+---
+
+## Notes de session
+
+_Utiliser cette section pour consigner les décisions prises en cours de route._
+
+- **2026-04-30** : Plan initial établi. Architecture validée : N pipelines Liquidsoap dans un
+  processus unique, filtrés par `station_id` en DB, rétrocompatibilité garantie via station
+  par défaut.
