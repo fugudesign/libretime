@@ -1692,6 +1692,12 @@ SQL;
 
         $ccShow->save();
         $this->ccShow = $ccShow;
+
+        // Persist station_id (not in Propel model, use raw SQL)
+        $stationId = isset($showData['add_show_station_id']) ? (int) $showData['add_show_station_id'] : 1;
+        $con = Propel::getConnection();
+        $stmt = $con->prepare('UPDATE cc_show SET station_id = :station_id WHERE id = :id');
+        $stmt->execute([':station_id' => $stationId, ':id' => $ccShow->getDbId()]);
     }
 
     /**

@@ -295,7 +295,7 @@ class Config
         );
 
         self::$values = $values;
-        self::fillLegacyValues($values);
+        self::fillLegacyValues($values, $dirty);
         self::$dot_values = new Dot($values);
     }
 
@@ -355,7 +355,7 @@ class Config
      * Legacy config
      */
 
-    private static function fillLegacyValues($values)
+    private static function fillLegacyValues($values, $dirty = [])
     {
         $legacy_values = [];
         // General
@@ -395,6 +395,9 @@ class Config
 
         // Stream
         $legacy_values['stream'] = $values['stream'];
+
+        // Stations: read directly from raw YAML (not validated by Symfony Config)
+        $legacy_values['stations'] = isset($dirty['stations']) ? $dirty['stations'] : [['id' => 1, 'name' => 'Default']];
 
         // Facebook (DEPRECATED)
         if (isset($values['facebook']['facebook_app_id'])) {

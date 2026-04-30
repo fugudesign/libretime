@@ -142,6 +142,15 @@ class Application_Service_ShowFormService
     {
         $ccShowInstance = CcShowInstancesQuery::create()->findPk($this->instanceId);
 
+        // Fetch station_id via raw SQL (not in Propel model)
+        $con = Propel::getConnection();
+        $stmt = $con->prepare('SELECT station_id FROM cc_show WHERE id = :id');
+        $stmt->execute([':id' => $this->ccShow->getDbId()]);
+        $stationId = $stmt->fetchColumn();
+        if ($stationId === false) {
+            $stationId = 1;
+        }
+
         $form->populate(
             [
                 'add_show_instance_id' => $this->instanceId,
@@ -151,6 +160,7 @@ class Application_Service_ShowFormService
                 'add_show_genre' => $this->ccShow->getDbGenre(),
                 'add_show_description' => $this->ccShow->getDbDescription(),
                 'add_show_instance_description' => $ccShowInstance->getDbDescription(),
+                'add_show_station_id' => $stationId,
             ]
         );
     }

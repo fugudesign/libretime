@@ -21,6 +21,27 @@ class Application_Form_AddShowWhat extends Zend_Form_SubForm
             'decorators' => ['ViewHelper'],
         ]);
 
+        // Station selector (hidden when only one station configured)
+        $CC_CONFIG = Config::getConfig();
+        $stations = isset($CC_CONFIG['stations']) ? $CC_CONFIG['stations'] : [['id' => 1, 'name' => 'Default']];
+        $stationOptions = [];
+        foreach ($stations as $s) {
+            $stationOptions[$s['id']] = $s['name'];
+        }
+        if (count($stationOptions) > 1) {
+            $this->addElement('select', 'add_show_station_id', [
+                'label'        => _('Station:'),
+                'multiOptions' => $stationOptions,
+                'required'     => true,
+                'value'        => 1,
+            ]);
+        } else {
+            $this->addElement('hidden', 'add_show_station_id', [
+                'value'      => 1,
+                'decorators' => ['ViewHelper'],
+            ]);
+        }
+
         // Add name element
         $this->addElement('text', 'add_show_name', [
             'label' => _('Name:'),
