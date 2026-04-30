@@ -24,16 +24,16 @@ liquidsoap:
 
 stations:
   - id: 1
-    name: "Radio A"
+    name: "Nina.fm Mont-Blanc"
     stream:
       inputs:
         main:
-          public_url: https://localhost:8001/main
-          mount: main-a
+          public_url: https://localhost:8001/nina-mont-blanc
+          mount: nina-mont-blanc
           port: 8001
           secure: true
         show:
-          mount: show-a
+          mount: show-nina-mont-blanc
           port: 8002
 
       outputs:
@@ -42,24 +42,24 @@ stations:
           port: 8000
           source_password: hackme
           admin_password: hackme
-          name: Radio A
-          description: LibreTime Radio A
+          name: Nina.fm - Mont-Blanc
+          description: LibreTime Nina.fm Mont-Blanc
           website: https://libretime.org
           genre: various
 
         icecast:
           - <<: *default_icecast_output
             enabled: true
-            mount: radio-a.ogg
-            public_url: https://localhost:8443/radio-a.ogg
+            mount: nina-mont-blanc.ogg
+            public_url: https://localhost:8443/nina-mont-blanc.ogg
             audio:
               format: ogg
               bitrate: 256
 
           - <<: *default_icecast_output
             enabled: true
-            mount: radio-a.mp3
-            public_url: https://localhost:8443/radio-a.mp3
+            mount: nina-mont-blanc.mp3
+            public_url: https://localhost:8443/nina-mont-blanc.mp3
             audio:
               format: mp3
               bitrate: 128
@@ -69,30 +69,30 @@ stations:
             kind: pulseaudio
 
   - id: 2
-    name: "Radio B"
+    name: "Nina.fm City Beach"
     stream:
       inputs:
         main:
-          mount: main-b
+          mount: nina-city-beach
           port: 8003
         show:
-          mount: show-b
+          mount: show-nina-city-beach
           port: 8004
 
       outputs:
         icecast:
           - <<: *default_icecast_output
             enabled: true
-            mount: radio-b.ogg
-            public_url: https://localhost:8443/radio-b.ogg
+            mount: nina-city-beach.ogg
+            public_url: https://localhost:8443/nina-city-beach.ogg
             audio:
               format: ogg
               bitrate: 256
 
           - <<: *default_icecast_output
             enabled: true
-            mount: radio-b.mp3
-            public_url: https://localhost:8443/radio-b.mp3
+            mount: nina-city-beach.mp3
+            public_url: https://localhost:8443/nina-city-beach.mp3
             audio:
               format: mp3
               bitrate: 128
