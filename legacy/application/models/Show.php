@@ -1044,7 +1044,8 @@ SELECT si1.starts            AS starts,
        si1.description       AS instance_description,
        si1.created           AS created,
        si1.last_scheduled    AS last_scheduled,
-       si1.time_filled       AS time_filled
+       si1.time_filled       AS time_filled,
+       show.station_id       AS station_id
 FROM cc_show_instances      AS si1
 LEFT JOIN cc_show_instances AS si2  ON si1.instance_id = si2.id
 LEFT JOIN cc_show           AS show ON show.id         = si1.show_id
@@ -1181,6 +1182,18 @@ SQL;
 
             $event['id'] = intval($show['instance_id']);
             $event['title'] = $show['name'];
+            // Append station name when multiple stations are configured
+            $CC_CONFIG = Config::getConfig();
+            $stations = isset($CC_CONFIG['stations']) ? $CC_CONFIG['stations'] : [];
+            if (count($stations) > 1) {
+                $stationId = isset($show['station_id']) ? (int) $show['station_id'] : 1;
+                foreach ($stations as $s) {
+                    if ((int) $s['id'] === $stationId) {
+                        $event['title'] .= ' (' . $s['name'] . ')';
+                        break;
+                    }
+                }
+            }
             $event['start'] = $startsDT->format(DEFAULT_TIMESTAMP_FORMAT);
             $event['end'] = $endsDT->format(DEFAULT_TIMESTAMP_FORMAT);
             $event['allDay'] = false;
