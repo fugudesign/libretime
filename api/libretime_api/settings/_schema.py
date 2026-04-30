@@ -1,10 +1,11 @@
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from libretime_shared.config import (
     BaseConfig,
     DatabaseConfig,
     GeneralConfig,
     RabbitMQConfig,
+    StationConfig,
     StorageConfig,
 )
 from pydantic import BaseModel
@@ -28,4 +29,5 @@ class Config(BaseConfig):
     database: DatabaseConfig = DatabaseConfig()
     rabbitmq: RabbitMQConfig = RabbitMQConfig()
     storage: StorageConfig = StorageConfig()
+    stations: List[StationConfig] = [StationConfig(id=1, name="Default")]
     email: EmailConfig = EmailConfig()

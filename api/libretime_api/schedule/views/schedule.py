@@ -13,6 +13,7 @@ class ScheduleFilter(filters.FilterSet):
     position_status = filters.NumberFilter()
     broadcasted = filters.NumberFilter()
 
+    station_id = filters.NumberFilter(field_name="instance__show__station_id")
     overbooked = filters.BooleanFilter(method="overbooked_filter")
 
     # pylint: disable=unused-argument

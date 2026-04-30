@@ -91,6 +91,8 @@ class Show(models.Model):
 
     override_outro_playlist = models.BooleanField(db_column="override_outro_playlist")
 
+    station_id = models.IntegerField(default=1)
+
     hosts = models.ManyToManyField(  # type: ignore[var-annotated]
         "core.User",
         through="ShowHost",

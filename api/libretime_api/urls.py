@@ -12,6 +12,7 @@ from .core.router import urls as core_urls
 from .history.router import urls as history_urls
 from .podcasts.router import urls as podcasts_urls
 from .schedule.router import urls as schedule_urls
+from .schedule.views import StationsView
 from .storage.router import urls as storage_urls
 
 api_urls = []
@@ -20,6 +21,7 @@ api_urls += history_urls
 api_urls += podcasts_urls
 api_urls += schedule_urls
 api_urls += storage_urls
+api_urls += [path("stations", StationsView.as_view(), name="stations")]
 
 
 urlpatterns = [

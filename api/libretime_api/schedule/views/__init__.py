@@ -1,5 +1,6 @@
 from .playlist import PlaylistContentViewSet, PlaylistViewSet
 from .schedule import ScheduleViewSet
+from .station import StationsView
 from .show import (
     ShowDaysViewSet,
     ShowHostViewSet,
