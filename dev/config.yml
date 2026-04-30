@@ -22,50 +22,77 @@ liquidsoap:
   harbor_ssl_certificate: /certs/fake.crt
   harbor_ssl_private_key: /certs/fake.key
 
-stream:
-  inputs:
-    main:
-      public_url: https://localhost:8001/main
-      mount: main
-      port: 8001
-      secure: true
+stations:
+  - id: 1
+    name: "Radio A"
+    stream:
+      inputs:
+        main:
+          public_url: https://localhost:8001/main
+          mount: main-a
+          port: 8001
+          secure: true
+        show:
+          mount: show-a
+          port: 8002
 
-  outputs:
-    .default_icecast_output: &default_icecast_output
-      host: icecast
-      port: 8000
-      source_password: hackme
-      admin_password: hackme
-      name: LibreTime!
-      description: LibreTime Radio!
-      website: https://libretime.org
-      genre: various
+      outputs:
+        .default_icecast_output: &default_icecast_output
+          host: icecast
+          port: 8000
+          source_password: hackme
+          admin_password: hackme
+          name: Radio A
+          description: LibreTime Radio A
+          website: https://libretime.org
+          genre: various
 
-    icecast:
-      - <<: *default_icecast_output
-        enabled: true
-        mount: main.ogg
-        public_url: https://localhost:8443/main.ogg
-        audio:
-          format: ogg
-          bitrate: 256
+        icecast:
+          - <<: *default_icecast_output
+            enabled: true
+            mount: radio-a.ogg
+            public_url: https://localhost:8443/radio-a.ogg
+            audio:
+              format: ogg
+              bitrate: 256
 
-      - <<: *default_icecast_output
-        enabled: true
-        mount: main.opus
-        public_url: https://localhost:8443/main.opus
-        audio:
-          format: opus
-          bitrate: 256
+          - <<: *default_icecast_output
+            enabled: true
+            mount: radio-a.mp3
+            public_url: https://localhost:8443/radio-a.mp3
+            audio:
+              format: mp3
+              bitrate: 128
 
-      - <<: *default_icecast_output
-        enabled: true
-        mount: main.mp3
-        public_url: https://localhost:8443/main.mp3
-        audio:
-          format: mp3
-          bitrate: 256
+        system:
+          - enabled: false
+            kind: pulseaudio
 
-    system:
-      - enabled: false
-        kind: pulseaudio
+  - id: 2
+    name: "Radio B"
+    stream:
+      inputs:
+        main:
+          mount: main-b
+          port: 8003
+        show:
+          mount: show-b
+          port: 8004
+
+      outputs:
+        icecast:
+          - <<: *default_icecast_output
+            enabled: true
+            mount: radio-b.ogg
+            public_url: https://localhost:8443/radio-b.ogg
+            audio:
+              format: ogg
+              bitrate: 256
+
+          - <<: *default_icecast_output
+            enabled: true
+            mount: radio-b.mp3
+            public_url: https://localhost:8443/radio-b.mp3
+            audio:
+              format: mp3
+              bitrate: 128

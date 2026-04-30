@@ -9,6 +9,7 @@ from ._models import (
     IcecastOutput,
     RabbitMQConfig,
     ShoutcastOutput,
+    StationConfig,
     StorageConfig,
     StreamConfig,
     SystemOutput,

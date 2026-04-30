@@ -279,3 +279,15 @@ class StreamConfig(BaseModel):
 
     inputs: Inputs = Inputs()
     outputs: Outputs = Outputs()  # type: ignore[call-arg]
+
+
+# StationConfig
+########################################################################################
+
+
+class StationConfig(BaseModel):
+    """Per-station configuration: id, name and its own stream (inputs + outputs)."""
+
+    id: int
+    name: str
+    stream: StreamConfig = StreamConfig()

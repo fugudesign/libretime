@@ -10,12 +10,12 @@ Legend: `done` / `in progress` / `todo` / `blocked`
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1.1 | Add `StationConfig` model to `shared/libretime_shared/config/_models.py` | todo | |
-| 1.2 | Update `Config` class in `playout/libretime_playout/config.py` | todo | Add `stations:`, keep `stream:` for compat |
-| 1.3 | Add backward-compat `_normalize_stations` validator | todo | |
-| 1.4 | Update `dev/config.yml` with 2-station example | todo | |
-| 1.5 | Update `docker-compose.yml` — expose ports 8003, 8004 | todo | |
-| 1.6 | Update config tests in `shared/tests/config/models_test.py` | todo | |
+| 1.1 | Add `StationConfig` model to `shared/libretime_shared/config/_models.py` | done | |
+| 1.2 | Update `Config` class in `playout/libretime_playout/config.py` | done | Add `stations:`, keep `stream:` for compat |
+| 1.3 | Add backward-compat `_normalize_stations` validator | done | |
+| 1.4 | Update `dev/config.yml` with 2-station example | done | |
+| 1.5 | Update `docker-compose.yml` — expose ports 8003, 8004 | done | |
+| 1.6 | Update config tests in `shared/tests/config/models_test.py` | done | 7/7 passing |
 
 ---
 

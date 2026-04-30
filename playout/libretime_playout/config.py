@@ -5,6 +5,7 @@ from libretime_shared.config import (
     BaseConfig,
     GeneralConfig,
     RabbitMQConfig,
+    StationConfig,
     StreamConfig,
 )
 from pydantic import BaseModel, model_validator
@@ -59,4 +60,12 @@ class Config(BaseConfig):
     rabbitmq: RabbitMQConfig = RabbitMQConfig()
     playout: PlayoutConfig = PlayoutConfig()
     liquidsoap: LiquidsoapConfig = LiquidsoapConfig()
-    stream: StreamConfig = StreamConfig()
+    stream: Optional[StreamConfig] = None   # kept for backward compatibility
+    stations: List[StationConfig] = []
+
+    @model_validator(mode="after")
+    def _normalize_stations(self) -> "Config":
+        """If no stations are defined but a legacy stream block exists, wrap it as station id=1."""
+        if not self.stations and self.stream is not None:
+            self.stations = [StationConfig(id=1, name="Default", stream=self.stream)]
+        return self

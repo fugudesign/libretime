@@ -7,6 +7,7 @@ from libretime_shared.config._models import (
     AudioOGG,
     AudioOpus,
     GeneralConfig,
+    StationConfig,
     StreamConfig,
 )
 
@@ -76,3 +77,37 @@ def test_stream_config():
     assert len(config.outputs.icecast) == 1
     assert len(config.outputs.shoutcast) == 1
     assert len(config.outputs.system) == 1
+
+
+def test_station_config():
+    icecast_output = {
+        "mount": "mount",
+        "source_password": "hackme",
+        "audio": {"format": "ogg", "bitrate": 256},
+    }
+
+    # Basic station with a stream
+    station = StationConfig(
+        id=1,
+        name="Radio A",
+        stream={
+            "outputs": {"icecast": [icecast_output]},
+        },
+    )
+    assert station.id == 1
+    assert station.name == "Radio A"
+    assert len(station.stream.outputs.icecast) == 1
+
+    # Station with no stream uses defaults (empty outputs)
+    station_empty = StationConfig(id=2, name="Radio B")
+    assert station_empty.stream.outputs.icecast == []
+
+    # Multiple stations
+    stations = [
+        StationConfig(id=1, name="Radio A"),
+        StationConfig(id=2, name="Radio B"),
+    ]
+    assert len(stations) == 2
+    assert stations[0].id == 1
+    assert stations[1].id == 2
+
