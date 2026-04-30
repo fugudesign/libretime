@@ -113,7 +113,7 @@ class TelnetLiquidsoap:
 
         try:
             logger.debug("Disconnecting source: %s", sourcename)
-            self.liq_client.source_switch_status(sourcename, False)
+            self.liq_client.source_switch_status(sourcename, False, station_ids=self.station_ids)
         except OSError as exception:
             logger.exception(exception)
 
@@ -157,10 +157,11 @@ class Liquidsoap:
                 self.liq_queue_tracker[q] = None
 
         self.liq_client = liq_client
+        self.station_ids = list(self._station_queue_ranges.keys())
         self.telnet_liquidsoap = TelnetLiquidsoap(
             liq_client,
             list(self.liq_queue_tracker.keys()),
-            station_ids=list(self._station_queue_ranges.keys()),
+            station_ids=self.station_ids,
         )
 
     def play(self, event: AnyEvent) -> None:

@@ -141,14 +141,17 @@ class PypoFetch(Thread):
             self.liquidsoap.liq_client.source_switch_status(
                 name="master_dj",
                 streaming=state.input_main_streaming,
+                station_ids=self.liquidsoap.station_ids,
             )
             self.liquidsoap.liq_client.source_switch_status(
                 name="live_dj",
                 streaming=state.input_show_streaming,
+                station_ids=self.liquidsoap.station_ids,
             )
             self.liquidsoap.liq_client.source_switch_status(
                 name="scheduled_play",
                 streaming=state.schedule_streaming,
+                station_ids=self.liquidsoap.station_ids,
             )
 
         except OSError as exception:
