@@ -236,6 +236,9 @@ class Schema implements ConfigurationInterface
             // END Stream schema
             ->end()->end()
 
+            // Multi-station: accept and ignore the "stations" key
+            ->arrayNode('stations')->ignoreExtraKeys()->arrayPrototype()->ignoreExtraKeys()->end()->end()
+
             // END Schema
             ->end();
 
