@@ -49,9 +49,11 @@ class TelnetLiquidsoap:
         self,
         liq_client: LiquidsoapClient,
         queues: List[int],
+        station_ids: Optional[List[int]] = None,
     ):
         self.liq_client = liq_client
         self.queues = queues
+        self.station_ids: List[int] = station_ids if station_ids is not None else [1]
 
     def queue_clear_all(self):
         try:
@@ -121,11 +123,10 @@ class TelnetLiquidsoap:
 
         try:
             logger.debug('Switching source: %s to "%s" status', sourcename, status)
-            station_ids = list(self._station_queue_ranges.keys())
             self.liq_client.source_switch_status(
                 sourcename,
                 status == "on",
-                station_ids=station_ids,
+                station_ids=self.station_ids,
             )
         except OSError as exception:
             logger.exception(exception)
@@ -159,6 +160,7 @@ class Liquidsoap:
         self.telnet_liquidsoap = TelnetLiquidsoap(
             liq_client,
             list(self.liq_queue_tracker.keys()),
+            station_ids=list(self._station_queue_ranges.keys()),
         )
 
     def play(self, event: AnyEvent) -> None:
