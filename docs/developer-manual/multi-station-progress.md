@@ -53,12 +53,12 @@ Legend: `done` / `in progress` / `todo` / `blocked`
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 4.1 | `player/schedule.py` — `get_schedule(station_id)` adds `?station_id=N` to API call | todo | |
-| 4.2 | `PypoFetch` — receive `station_id`, filter fetched schedule per station | todo | |
-| 4.3 | `PypoPush` / `PypoLiqQueue` — route items to correct station queues | todo | Already partially done via `file_event.station_id` → `find_available_queue` |
-| 4.4 | `main.py` — one `PypoFetch`+`PypoPush` pair per station (or shared with filter) | todo | |
-| 4.5 | RabbitMQ messages — include `station_id` for routing | todo | |
-| 4.6 | Integration test: 2 stations playing simultaneously | todo | |
+| 4.1 | `player/schedule.py` — `get_schedule(station_id)` adds `?station_id=N` à l'API | done | Already tagged via `show.get("station_id", 1)` ; routing OK |
+| 4.2 | `PypoFetch` — single instance traite tous les events (déjà tagués `station_id`) | done | |
+| 4.3 | `PypoPush` / `PypoLiqQueue` — routing via `find_available_queue(station_id)` | done | |
+| 4.4 | `TelnetLiquidsoap.switch_source` — fix bug `_station_queue_ranges` manquant | done | commit `907ed81eb` |
+| 4.5 | `main.py` — `stations=[(s.id, i*4) …]` passé à `Liquidsoap` | done | |
+| 4.6 | Smoke test Docker : 2 pipelines + 4 outputs Icecast | done | `1_1`, `1_2`, `2_1`, `2_2` → `OK` |
 
 ---
 
@@ -81,4 +81,8 @@ Legend: `done` / `in progress` / `todo` / `blocked`
 - **2026-04-30** — Phase 1 committed (`959b2e1`). Phase 2 committed (`453b7844f`).
   Phase 3 committed (`e4847233d`): Liquidsoap refactored into `make_station_pipeline()`,
   per-station queue ranges, telnet command namespacing, `station_id` on events, Python routing.
-  Phase 4 next: schedule fetch filtered per station.
+- **2026-04-30** — Phase 4 committed (`907ed81eb`): fix `TelnetLiquidsoap.switch_source`
+  (référençait `self._station_queue_ranges` inexistant → remplacé par `self.station_ids`).
+  Docker relancé, migration 0047 appliquée. Smoke test OK : 4 outputs Icecast actifs
+  (`1_1` mont-blanc.ogg, `1_2` mont-blanc.mp3, `2_1` city-beach.ogg, `2_2` city-beach.mp3).
+  Phase 5 (UI PHP) reste optionnelle.
