@@ -127,6 +127,7 @@ def generate_file_events(
         id=file["id"],
         # Show data
         show_name=show["name"],
+        station_id=show.get("station_id", 1),
         # Extra data
         fade_in=time_in_milliseconds(time.fromisoformat(schedule["fade_in"])),
         fade_out=time_in_milliseconds(time.fromisoformat(schedule["fade_out"])),

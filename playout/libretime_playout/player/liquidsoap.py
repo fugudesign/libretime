@@ -121,19 +121,39 @@ class TelnetLiquidsoap:
 
         try:
             logger.debug('Switching source: %s to "%s" status', sourcename, status)
-            self.liq_client.source_switch_status(sourcename, status == "on")
+            station_ids = list(self._station_queue_ranges.keys())
+            self.liq_client.source_switch_status(
+                sourcename,
+                status == "on",
+                station_ids=station_ids,
+            )
         except OSError as exception:
             logger.exception(exception)
 
 
 class Liquidsoap:
-    def __init__(self, liq_client: LiquidsoapClient):
-        self.liq_queue_tracker: Dict[int, Optional[FileEvent]] = {
-            0: None,
-            1: None,
-            2: None,
-            3: None,
-        }
+    def __init__(
+        self,
+        liq_client: LiquidsoapClient,
+        stations: Optional[List[tuple]] = None,
+    ):
+        """
+        Args:
+            liq_client: Liquidsoap telnet client.
+            stations: List of (station_id, queue_offset) pairs.
+                      Defaults to [(1, 0)] for single-station backward compat.
+        """
+        if stations is None:
+            stations = [(1, 0)]
+
+        # Map station_id -> range of queue ids
+        self._station_queue_ranges: Dict[int, range] = {}
+        self.liq_queue_tracker: Dict[int, Optional[FileEvent]] = {}
+
+        for station_id, queue_offset in stations:
+            self._station_queue_ranges[station_id] = range(queue_offset, queue_offset + 4)
+            for q in range(queue_offset, queue_offset + 4):
+                self.liq_queue_tracker[q] = None
 
         self.liq_client = liq_client
         self.telnet_liquidsoap = TelnetLiquidsoap(
@@ -162,7 +182,9 @@ class Liquidsoap:
             iter_num += 1
 
         if file_event.file_ready:
-            available_queue = self.find_available_queue()
+            available_queue = self.find_available_queue(
+                getattr(file_event, "station_id", 1)
+            )
 
             try:
                 self.telnet_liquidsoap.queue_push(available_queue, file_event)
@@ -197,11 +219,12 @@ class Liquidsoap:
         elif event.event_type == "switch_off":
             self.telnet_liquidsoap.switch_source("live_dj", "off")
 
-    def find_available_queue(self) -> int:
+    def find_available_queue(self, station_id: int = 1) -> int:
+        queue_range = self._station_queue_ranges.get(station_id, range(0, 4))
         available_queue = None
-        for queue_id, item in self.liq_queue_tracker.items():
+        for queue_id in queue_range:
+            item = self.liq_queue_tracker.get(queue_id)
             if item is None or item.ended():
-                # queue "i" is available. Push to this queue
                 available_queue = queue_id
 
         if available_queue is None:

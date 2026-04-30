@@ -130,7 +130,8 @@ def cli(
         LiquidsoapClient(
             host=config.playout.liquidsoap_host,
             port=config.playout.liquidsoap_port,
-        )
+        ),
+        stations=[(s.id, i * 4) for i, s in enumerate(config.stations)],
     )
 
     PypoFile(file_queue, api_client).start()

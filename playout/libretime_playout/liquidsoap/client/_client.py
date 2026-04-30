@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 from time import sleep
-from typing import Any, Literal, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional, Tuple, Union
 
 from ..models import MessageFormatKind
 from ..utils import quote
@@ -114,7 +114,10 @@ class LiquidsoapClient:
         self,
         name: Literal["master_dj", "live_dj", "scheduled_play"],
         streaming: bool,
+        station_ids: Optional[List[int]] = None,
     ) -> None:
+        if station_ids is None:
+            station_ids = [1]
         name_map = {
             "master_dj": "input_main",
             "live_dj": "input_show",
@@ -122,8 +125,9 @@ class LiquidsoapClient:
         }
         action = "start" if streaming else "stop"
         with self.conn:
-            self.conn.write(f"sources.{action}_{name_map[name]}")
-            self.conn.read()  # Flush
+            for station_id in station_ids:
+                self.conn.write(f"station_{station_id}.{action}_{name_map[name]}")
+                self.conn.read()  # Flush
 
     def settings_update(
         self,

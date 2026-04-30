@@ -67,6 +67,7 @@ class FileEvent(BaseEvent):
 
     # Show data
     show_name: str
+    station_id: int = 1
 
     # File
     fade_in: float
@@ -107,6 +108,7 @@ class WebStreamEvent(BaseEvent):
 
     # Show data
     show_name: str
+    station_id: int = 1
 
 
 class ActionEventKind(str, Enum):

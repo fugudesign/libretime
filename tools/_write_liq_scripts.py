@@ -1,0 +1,464 @@
+#!/usr/bin/env python3
+"""Helper to write refactored Liquidsoap scripts for multi-station support."""
+import pathlib
+
+BASE = pathlib.Path(__file__).parent.parent / "playout/libretime_playout/liquidsoap"
+
+# ---------------------------------------------------------------------------
+# 1.4 ls_script.liq
+# ---------------------------------------------------------------------------
+
+LIQ_1_4 = r"""boot_timestamp = string_of(gettimeofday())
+
+web_stream_enabled = ref false
+web_stream_id = ref '-1'
+
+show_name = interactive.string("show_name", "")
+
+dynamic_metadata_callback = ref fun (~new_track=false, s) -> begin () end
+
+just_switched = ref false
+
+%include "ls_lib.liq"
+
+def web_stream_set_id(value)
+    web_stream_id := value
+    string_of(!web_stream_id)
+end
+
+def web_stream_get_id()
+    string_of(!web_stream_id)
+end
+
+server.register(namespace="sources",
+                description="Start webstream source",
+                "start_web_stream",
+                fun (s) -> begin log("sources.start_web_stream")
+                    notify([("schedule_table_id", !web_stream_id)])
+                    web_stream_enabled := true "enabled" end)
+server.register(namespace="sources",
+                description="Stop webstream source",
+                "stop_web_stream",
+                fun (s) -> begin log("sources.stop_web_stream") web_stream_enabled := false "disabled" end)
+
+server.register(namespace="web_stream",
+                description="Set the web stream id",
+                "set_id",
+                fun (s) -> begin log("web_stream.set_id") web_stream_set_id(s) end)
+
+server.register(namespace="web_stream",
+                description="Get the web stream id",
+                "get_id",
+                fun (s) -> begin log("web_stream.get_id") web_stream_get_id() end)
+
+# Build an independent audio pipeline for one station.
+# Returns the final mixed source `s` ready to be passed to outputs.
+def make_station_pipeline(
+        ~station_id,
+        ~queue_offset,
+        ~input_main_mount,
+        ~input_main_port,
+        ~input_main_secure,
+        ~input_show_mount,
+        ~input_show_port,
+        ~input_show_secure) =
+
+    sources = ref []
+    source_id = ref 0
+
+    def create_source()
+        this_source_id = queue_offset + !source_id
+
+        l = request.equeue(id="s#{this_source_id}", length=0.5)
+        l = audio_to_stereo(id="queue_src_#{station_id}", l)
+        l = cue_cut(l)
+        l = amplify(1., override="replay_gain", l)
+        l = fade.in(l)
+        l = fade.out(l)
+        l = on_metadata(notify_queue, l)
+
+        sources := list.append([l], !sources)
+        server.register(namespace="queues",
+                    "s#{this_source_id}_skip",
+                    fun (s) -> begin log("queues.s#{this_source_id}_skip")
+                        clear_queue(l)
+                        "Done"
+                    end)
+        source_id := !source_id + 1
+    end
+
+    create_source()
+    create_source()
+    create_source()
+    create_source()
+
+    queue = add(!sources, normalize=false)
+    pair = insert_metadata(queue)
+    # Only update global dynamic_metadata_callback for station 1 (used by web streams)
+    if station_id == 1 then
+        dynamic_metadata_callback := fst(pair)
+    end
+    queue_with_meta = snd(pair)
+
+    output.dummy(fallible=true, queue_with_meta)
+
+    # Station 1 gets HTTP web-stream input; others use the queue directly
+    stream_queue =
+        if station_id == 1 then
+            h = input.http_restart(id="http")
+            h = cross_http(http_input_id="http", h)
+            output.dummy(fallible=true, h)
+            sq = http_fallback(http_input_id="http", http=h, default=queue_with_meta)
+            map_metadata(id="map_metadata:schedule_#{station_id}", update=false, append_title, sq)
+        else
+            map_metadata(id="map_metadata:schedule_#{station_id}", update=false, append_title, queue_with_meta)
+        end
+
+    ignore(output.dummy(stream_queue, fallible=true))
+
+    default = amplify(id="silence_src_#{station_id}", 0.00001, noise())
+
+    def map_message_offline(m) =
+        [("title", message_offline())]
+    end
+
+    default = map_metadata(id="map_metadata:offline_#{station_id}", map_message_offline, default)
+    ignore(output.dummy(default, fallible=true))
+
+    input_main_streaming = ref false
+    input_show_streaming = ref false
+    schedule_streaming = ref false
+
+    def start_input_main() input_main_streaming := true end
+    def stop_input_main() input_main_streaming := false end
+    def start_input_show() input_show_streaming := true end
+    def stop_input_show() input_show_streaming := false end
+    def start_schedule() schedule_streaming := true; just_switched := true end
+    def stop_schedule() schedule_streaming := false end
+
+    def update_source_status(sourcename, status) =
+        gateway("live '#{sourcename}' '#{status}'")
+    end
+
+    def input_main_on_connect(header) update_source_status("master_dj", true) end
+    def input_main_on_disconnect() update_source_status("master_dj", false) end
+    def input_show_on_connect(header) update_source_status("live_dj", true) end
+    def input_show_on_disconnect() update_source_status("live_dj", false) end
+
+    def make_input_func(secure)
+        if secure then input.harbor.ssl
+        else input.harbor
+        end
+    end
+
+    def make_input_auth_handler(input_name)
+        def auth_handler(user, password)
+            log("user '#{user}' connected", label="#{input_name}_input")
+            ret = test_process("libretime-playout-notify live-auth '#{input_name}' '#{user}' '#{password}'")
+            if ret then
+                log("user '#{user}' authenticated", label="#{input_name}_input")
+            else
+                log("user '#{user}' auth failed", label="#{input_name}_input", level=2)
+            end
+            ret
+        end
+        auth_handler
+    end
+
+    s = switch(id="switch:blank+schedule_#{station_id}",
+                track_sensitive=false,
+                transitions=[transition_default, transition],
+                [({!schedule_streaming}, stream_queue), ({true}, default)])
+
+    s = if input_show_port != 0 and input_show_mount != "" then
+        input_show_func = make_input_func(input_show_secure)
+        input_show_source =
+            audio_to_stereo(
+                input_show_func(id="harbor:input_show_#{station_id}",
+                    input_show_mount,
+                    port=input_show_port,
+                    auth=make_input_auth_handler("show"),
+                    max=40.,
+                    on_connect=input_show_on_connect,
+                    on_disconnect=input_show_on_disconnect))
+        ignore(output.dummy(input_show_source, fallible=true))
+        switch(id="switch:blank+schedule+show_#{station_id}",
+                track_sensitive=false,
+                transitions=[transition, transition],
+                [({!input_show_streaming}, input_show_source), ({true}, s)])
+    else
+        s
+    end
+
+    s = if input_main_port != 0 and input_main_mount != "" then
+        input_main_func = make_input_func(input_main_secure)
+        input_main_source =
+            audio_to_stereo(
+                input_main_func(id="harbor:input_main_#{station_id}",
+                    input_main_mount,
+                    port=input_main_port,
+                    auth=make_input_auth_handler("main"),
+                    max=40.,
+                    on_connect=input_main_on_connect,
+                    on_disconnect=input_main_on_disconnect))
+        ignore(output.dummy(input_main_source, fallible=true))
+        switch(id="switch:blank+schedule+show+main_#{station_id}",
+                track_sensitive=false,
+                transitions=[transition, transition],
+                [({!input_main_streaming}, input_main_source), ({true}, s)])
+    else
+        s
+    end
+
+    server.register(namespace="station_#{station_id}", description="Stop main input source.", usage="stop_input_main", "stop_input_main",
+        fun (s) -> begin log("station_#{station_id}.stop_input_main") stop_input_main() "Done" end)
+    server.register(namespace="station_#{station_id}", description="Start main input source.", usage="start_input_main", "start_input_main",
+        fun (s) -> begin log("station_#{station_id}.start_input_main") start_input_main() "Done" end)
+    server.register(namespace="station_#{station_id}", description="Stop show input source.", usage="stop_input_show", "stop_input_show",
+        fun (s) -> begin log("station_#{station_id}.stop_input_show") stop_input_show() "Done" end)
+    server.register(namespace="station_#{station_id}", description="Start show input source.", usage="start_input_show", "start_input_show",
+        fun (s) -> begin log("station_#{station_id}.start_input_show") start_input_show() "Done" end)
+    server.register(namespace="station_#{station_id}", description="Stop schedule source.", usage="stop_schedule", "stop_schedule",
+        fun (s) -> begin log("station_#{station_id}.stop_schedule") stop_schedule() "Done" end)
+    server.register(namespace="station_#{station_id}", description="Start schedule source.", usage="start_schedule", "start_schedule",
+        fun (s) -> begin log("station_#{station_id}.start_schedule") start_schedule() "Done" end)
+
+    s
+end
+"""
+
+# ---------------------------------------------------------------------------
+# 2.1 ls_script.liq
+# ---------------------------------------------------------------------------
+
+LIQ_2_1 = r"""boot_timestamp = string_of(time())
+
+web_stream_enabled = ref(false)
+web_stream_id = ref( '-1')
+
+show_name = interactive.string("show_name", "")
+
+dynamic_metadata_callback = ref (fun (~new_track=false, s) -> begin () end)
+
+just_switched = ref (false)
+
+%include "ls_lib.liq"
+
+enable_replaygain_metadata()
+
+def web_stream_set_id(value)
+  web_stream_id := value
+  string_of(!web_stream_id)
+end
+
+def web_stream_get_id()
+  string_of(!web_stream_id)
+end
+
+server.register(namespace="sources",
+                description="Start webstream source",
+                "start_web_stream",
+                fun (s) -> begin log("sources.start_web_stream")
+                    notify([("schedule_table_id", !web_stream_id)])
+                    web_stream_enabled := true "enabled" end)
+server.register(namespace="sources",
+                description="Stop webstream source",
+                "stop_web_stream",
+                fun (s) -> begin log("sources.stop_web_stream") web_stream_enabled := false "disabled" end)
+
+server.register(namespace="web_stream",
+                description="Set the web stream id",
+                "set_id",
+                fun (s) -> begin log("web_stream.set_id") web_stream_set_id(s) end)
+
+server.register(namespace="web_stream",
+                description="Get the web stream id",
+                "get_id",
+                fun (s) -> begin log("web_stream.get_id") web_stream_get_id() end)
+
+# Build an independent audio pipeline for one station.
+# Returns the final mixed source `s` ready to be passed to outputs.
+def make_station_pipeline(
+  ~station_id,
+  ~queue_offset,
+  ~input_main_mount,
+  ~input_main_port,
+  ~input_main_secure,
+  ~input_show_mount,
+  ~input_show_port,
+  ~input_show_secure) =
+
+  sources = ref([])
+  source_id = ref (0)
+
+  def create_source()
+    this_source_id = queue_offset + !source_id
+    l = request.queue(id="s#{this_source_id}")
+
+    l = audio_to_stereo(id="queue_src_#{station_id}", l)
+    l = cue_cut(l)
+    l = amplify(1., override="replay_gain", l)
+
+    l = fade.in(l)
+    l = fade.out(l)
+
+    l = map_metadata(notify_queue,l)
+    l = cross_http(http_input_id="http_#{station_id}",l)
+    l = http_fallback(http_input_id="http_#{station_id}", http=l, default=l)
+    l = map_metadata(id="map_metadata:schedule_#{station_id}", update=false, append_title, l)
+    sources := list.append([l], !sources)
+    server.register(namespace="queues",
+                "s#{this_source_id}_skip",
+                fun (s) -> begin log("queues.s#{this_source_id}_skip")
+                    clear_queue(l)
+                    "Done"
+                end)
+    source_id := !source_id + 1
+  end
+
+  create_source()
+  create_source()
+  create_source()
+  create_source()
+
+  queue = add(!sources)
+  queue = insert_metadata(queue)
+  # Only update global dynamic_metadata_callback for station 1 (used by web streams)
+  if station_id == 1 then
+    dynamic_metadata_callback := queue.insert_metadata
+  end
+
+  output.dummy(fallible=true, queue)
+  ignore(output.dummy(queue, fallible=true))
+
+  default = amplify(id="silence_src_#{station_id}", 0.00001, noise())
+
+  def map_message_offline(m) =
+    [("title", message_offline())]
+  end
+
+  default = map_metadata(id="map_metadata:offline_#{station_id}", map_message_offline, default)
+  ignore(output.dummy(default, fallible=true))
+
+  input_main_streaming = ref (false)
+  input_show_streaming = ref (false)
+  schedule_streaming = ref (false)
+
+  def start_input_main() input_main_streaming := true end
+  def stop_input_main() input_main_streaming := false end
+  def start_input_show() input_show_streaming := true end
+  def stop_input_show() input_show_streaming := false end
+  def start_schedule() schedule_streaming := true; just_switched := true end
+  def stop_schedule() schedule_streaming := false end
+
+  def update_source_status(sourcename, status) =
+      gateway("live '#{sourcename}' '#{status}'")
+  end
+
+  def input_main_on_connect(header) update_source_status("master_dj", true) end
+  def input_main_on_disconnect() update_source_status("master_dj", false) end
+  def input_show_on_connect(header) update_source_status("live_dj", true) end
+  def input_show_on_disconnect() update_source_status("live_dj", false) end
+
+  def make_input_auth_handler(input_name)
+      def auth_handler(args)
+          log("user '#{args.user}' connected", label="#{input_name}_input")
+          ret = test_process("libretime-playout-notify live-auth '#{input_name}' '#{args.user}' '#{args.password}'")
+          if ret then
+              log("user '#{args.user}' authenticated", label="#{input_name}_input")
+          else
+              log("user '#{args.user}' auth failed", label="#{input_name}_input",level=2)
+          end
+          ret
+      end
+      auth_handler
+  end
+
+  s = switch(id="switch:blank+schedule_#{station_id}",
+              track_sensitive=false,
+              transitions=[transition_default, transition],
+              [({!schedule_streaming}, queue), ({true}, default)]
+      )
+
+  s = if input_show_port != 0 and input_show_mount != "" then
+      input_show_source =
+          audio_to_stereo(
+              input.harbor(id="harbor:input_show_#{station_id}",
+                  input_show_mount,
+                  port=input_show_port,
+                  auth=make_input_auth_handler("show"),
+                  max=40.,
+                  on_connect=input_show_on_connect,
+                  on_disconnect=input_show_on_disconnect))
+
+      ignore(output.dummy(input_show_source, fallible=true))
+
+      switch(id="switch:blank+schedule+show_#{station_id}",
+              track_sensitive=false,
+              transitions=[transition, transition],
+              [({!input_show_streaming}, input_show_source), ({true}, s)]
+          )
+  else
+      s
+  end
+
+  s = if input_main_port != 0 and input_main_mount != "" then
+      input_main_source =
+          audio_to_stereo(
+              input.harbor(id="harbor:input_main_#{station_id}",
+                  input_main_mount,
+                  port=input_main_port,
+                  auth=make_input_auth_handler("main"),
+                  max=40.,
+                  on_connect=input_main_on_connect,
+                  on_disconnect=input_main_on_disconnect))
+
+      ignore(output.dummy(input_main_source, fallible=true))
+
+      switch(id="switch:blank+schedule+show+main_#{station_id}",
+              track_sensitive=false,
+              transitions=[transition, transition],
+              [({!input_main_streaming}, input_main_source), ({true}, s)]
+          )
+  else
+      s
+  end
+
+  server.register(namespace="station_#{station_id}",
+      description="Stop main input source.",
+      usage="stop_input_main",
+      "stop_input_main",
+      fun (s) -> begin log("station_#{station_id}.stop_input_main") stop_input_main() "Done" end)
+  server.register(namespace="station_#{station_id}",
+      description="Start main input source.",
+      usage="start_input_main",
+      "start_input_main",
+      fun (s) -> begin log("station_#{station_id}.start_input_main") start_input_main() "Done" end)
+  server.register(namespace="station_#{station_id}",
+      description="Stop show input source.",
+      usage="stop_input_show",
+      "stop_input_show",
+      fun (s) -> begin log("station_#{station_id}.stop_input_show") stop_input_show() "Done" end)
+  server.register(namespace="station_#{station_id}",
+      description="Start show input source.",
+      usage="start_input_show",
+      "start_input_show",
+      fun (s) -> begin log("station_#{station_id}.start_input_show") start_input_show() "Done" end)
+  server.register(namespace="station_#{station_id}",
+      description="Stop schedule source.",
+      usage="stop_schedule",
+      "stop_schedule",
+      fun (s) -> begin log("station_#{station_id}.stop_schedule") stop_schedule() "Done" end)
+  server.register(namespace="station_#{station_id}",
+      description="Start schedule source.",
+      usage="start_schedule",
+      "start_schedule",
+      fun (s) -> begin log("station_#{station_id}.start_schedule") start_schedule() "Done" end)
+
+  s
+end
+"""
+
+(BASE / "1.4/ls_script.liq").write_text(LIQ_1_4)
+(BASE / "2.1/ls_script.liq").write_text(LIQ_2_1)
+print("Written 1.4 and 2.1 ls_script.liq")

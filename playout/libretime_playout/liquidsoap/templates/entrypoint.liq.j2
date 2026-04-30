@@ -2,14 +2,6 @@
 ###########################################################
 # The ignore() lines are to squash unused variable warnings
 
-# Inputs
-input_main_mount = {{ config.stream.inputs.main.mount | quote }}
-input_main_port = {{ config.stream.inputs.main.port }}
-input_main_secure = {{ config.stream.inputs.main.secure | string | lower }}
-input_show_mount = {{ config.stream.inputs.show.mount | quote }}
-input_show_port = {{ config.stream.inputs.show.port }}
-input_show_secure = {{ config.stream.inputs.show.secure | string | lower }}
-
 # Settings
 {% if paths.log_filepath is defined -%}
 set("log.file.path", "{{ paths.log_filepath }}")
@@ -38,6 +30,19 @@ message_format = interactive.string("message_format", {{ preferences.message_for
 input_fade_transition = interactive.float("input_fade_transition", {{ preferences.input_fade_transition }})
 
 %include "{{ paths.lib_filepath }}"
+
+# Build one independent pipeline per station
+{% for station in config.stations %}
+s_{{ station.id }} = make_station_pipeline(
+  station_id={{ station.id }},
+  queue_offset={{ loop.index0 * 4 }},
+  input_main_mount={{ station.stream.inputs.main.mount | quote }},
+  input_main_port={{ station.stream.inputs.main.port }},
+  input_main_secure={{ station.stream.inputs.main.secure | string | lower }},
+  input_show_mount={{ station.stream.inputs.show.mount | quote }},
+  input_show_port={{ station.stream.inputs.show.port }},
+  input_show_secure={{ station.stream.inputs.show.secure | string | lower }})
+{% endfor %}
 
 {% include "outputs.liq.j2" %}
 

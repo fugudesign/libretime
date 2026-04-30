@@ -44,13 +44,13 @@
 {#-
   Build an icecast output the output configuration.
 #}
-{%- macro output_icecast(output_id, output) -%}
+{%- macro output_icecast(output_id, output, src="s") -%}
 # icecast:{{ output_id }}
 {#- Handle stereo or mono output #}
 {% if output.audio.channels == "stereo" -%}
-output_icecast_{{ output_id }}_source = s
+output_icecast_{{ output_id }}_source = {{ src }}
 {% else -%}
-output_icecast_{{ output_id }}_source = mean(s)
+output_icecast_{{ output_id }}_source = mean({{ src }})
 {% endif -%}
 
 {#- Add per output stream modifications. -#}
@@ -81,13 +81,13 @@ output.icecast(
 {#-
   Build a shoutcast output the output configuration.
 #}
-{%- macro output_shoutcast(output_id, output) -%}
+{%- macro output_shoutcast(output_id, output, src="s") -%}
 # shoutcast:{{ output_id }}
 {#- Handle stereo or mono output #}
 {% if output.audio.channels == "stereo" -%}
-output_shoutcast_{{ output_id }}_source = s
+output_shoutcast_{{ output_id }}_source = {{ src }}
 {% else -%}
-output_shoutcast_{{ output_id }}_source = mean(s)
+output_shoutcast_{{ output_id }}_source = mean({{ src }})
 {% endif -%}
 
 output.shoutcast(
@@ -120,7 +120,7 @@ output.shoutcast(
 {#-
   Build a system output configuration.
 #}
-{%- macro output_system(output_id, output) -%}
+{%- macro output_system(output_id, output, src="s") -%}
 # {{ output.kind.value }}:{{ output_id }}
 %ifndef output.{{ output.kind.value }}
 log("output.{{ output.kind.value }} is not defined!")
@@ -137,34 +137,38 @@ output.{{ output.kind.value }}(
   device="{{ output.device }}",
 {%- endif %}
 {%- endif %}
-  s
+  {{ src }}
 )
 %endif
 {%- endmacro -%}
 
 {# ############################### #}
 
-{%- for output in config.stream.outputs.system -%}
+{%- for station in config.stations %}
+{%- set src = "s_" ~ station.id %}
+
+{%- for output in station.stream.outputs.system -%}
 {% if output.enabled -%}
-{{ output_system(loop.index, output) }}
+{{ output_system(station.id ~ "_" ~ loop.index, output, src) }}
 
 {% endif -%}
-{% endfor -%}
+{%- endfor -%}
 
-{%- for output in config.stream.outputs.icecast -%}
+{%- for output in station.stream.outputs.icecast -%}
 {% if output.enabled -%}
-{{ output_icecast(loop.index, output) }}
+{{ output_icecast(station.id ~ "_" ~ loop.index, output, src) }}
 
 {% endif -%}
-{% endfor -%}
+{%- endfor -%}
 
-{% for output in config.stream.outputs.shoutcast -%}
+{%- for output in station.stream.outputs.shoutcast -%}
 {% if output.enabled -%}
 {#
   Icecast and Shoutcast streams are merged in legacy, so we need to use a custom index
   as stream id.
 -#}
-{{ output_shoutcast((config.stream.outputs.icecast | length) + loop.index, output) }}
+{{ output_shoutcast(station.id ~ "_" ~ ((station.stream.outputs.icecast | length) + loop.index), output, src) }}
 
 {% endif -%}
-{% endfor -%}
+{%- endfor -%}
+{%- endfor -%}
