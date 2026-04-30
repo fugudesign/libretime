@@ -248,12 +248,17 @@ class Application_Form_AddShowWhen extends Zend_Form_SubForm
                         $showEndDateTime,
                         $update,
                         null,
-                        $formData['add_show_id']
+                        $formData['add_show_id'],
+                        $formData['add_show_station_id'] ?? null
                     );
                 } else {
                     $overlapping = Application_Model_Schedule::checkOverlappingShows(
                         $showStartDateTime,
-                        $showEndDateTime
+                        $showEndDateTime,
+                        false,
+                        null,
+                        null,
+                        $formData['add_show_station_id'] ?? null
                     );
                 }
 
@@ -297,7 +302,11 @@ class Application_Form_AddShowWhen extends Zend_Form_SubForm
                                 // this is a new show
                                 $overlapping = Application_Model_Schedule::checkOverlappingShows(
                                     $repeatShowStart,
-                                    $repeatShowEnd
+                                    $repeatShowEnd,
+                                    false,
+                                    null,
+                                    null,
+                                    $formData['add_show_station_id'] ?? null
                                 );
                             } else {
                                 $overlapping = Application_Model_Schedule::checkOverlappingShows(
@@ -305,7 +314,8 @@ class Application_Form_AddShowWhen extends Zend_Form_SubForm
                                     $repeatShowEnd,
                                     $update,
                                     null,
-                                    $formData['add_show_id']
+                                    $formData['add_show_id'],
+                                    $formData['add_show_station_id'] ?? null
                                 );
                             }
 
@@ -345,7 +355,7 @@ class Application_Form_AddShowWhen extends Zend_Form_SubForm
                     $this->getElement('add_show_duration')->setErrors([_('Cannot schedule overlapping shows')]);
                 }
             } else {
-                $overlapping = Application_Model_Schedule::checkOverlappingShows($showStartDateTime, $showEndDateTime, $update, $instanceId);
+                $overlapping = Application_Model_Schedule::checkOverlappingShows($showStartDateTime, $showEndDateTime, $update, $instanceId, null, $formData['add_show_station_id'] ?? null);
                 if ($overlapping) {
                     $this->getElement('add_show_duration')->setErrors([_('Cannot schedule overlapping shows')]);
                     $valid = false;

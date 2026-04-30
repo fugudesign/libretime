@@ -1157,7 +1157,8 @@ SQL;
         $show_end,
         $update = false,
         $instanceId = null,
-        $showId = null
+        $showId = null,
+        $stationId = null
     ) {
         // if the show instance does not exist or was deleted, return false
         if (!is_null($showId)) {
@@ -1182,53 +1183,44 @@ SQL;
             ':show_end3' => $show_end->format(DEFAULT_TIMESTAMP_FORMAT),
         ];
 
+        // Station filter: only check conflicts within the same station
+        $stationJoin = '';
+        if (!is_null($stationId)) {
+            $stationJoin = 'JOIN cc_show AS s ON s.id = si.show_id AND s.station_id = :station_id';
+            $params[':station_id'] = (int) $stationId;
+        }
+
         /* If a show is being edited, exclude it from the query
          * In both cases (new and edit) we only grab shows that
          * are scheduled 2 days prior
          */
         if ($update) {
-            $sql = <<<'SQL'
-SELECT id,
-       starts,
-       ends
-FROM cc_show_instances
-WHERE (ends <= :show_end1
-       OR starts <= :show_end2)
-  AND date(starts) >= (date(:show_end3) - INTERVAL '2 days')
-  AND modified_instance = FALSE
-SQL;
+            $sql = "SELECT si.id, si.starts, si.ends
+ FROM cc_show_instances AS si
+ {$stationJoin}
+ WHERE (si.ends <= :show_end1
+       OR si.starts <= :show_end2)
+  AND date(si.starts) >= (date(:show_end3) - INTERVAL '2 days')
+  AND si.modified_instance = FALSE";
             if (is_null($showId)) {
-                $sql .= <<<'SQL'
-  AND id != :instanceId
-ORDER BY ends
-SQL;
+                $sql .= ' AND si.id != :instanceId ORDER BY si.ends';
                 $params[':instanceId'] = $instanceId;
             } else {
-                $sql .= <<<'SQL'
-  AND show_id != :showId
-ORDER BY ends
-SQL;
+                $sql .= ' AND si.show_id != :showId ORDER BY si.ends';
                 $params[':showId'] = $showId;
             }
             $rows = Application_Common_Database::prepareAndExecute($sql, $params, 'all');
         } else {
-            $sql = <<<'SQL'
-SELECT id,
-       starts,
-       ends
-FROM cc_show_instances
-WHERE (ends <= :show_end1
-       OR starts <= :show_end2)
-  AND date(starts) >= (date(:show_end3) - INTERVAL '2 days')
-  AND modified_instance = FALSE
-ORDER BY ends
-SQL;
+            $sql = "SELECT si.id, si.starts, si.ends
+ FROM cc_show_instances AS si
+ {$stationJoin}
+ WHERE (si.ends <= :show_end1
+       OR si.starts <= :show_end2)
+  AND date(si.starts) >= (date(:show_end3) - INTERVAL '2 days')
+  AND si.modified_instance = FALSE
+ORDER BY si.ends";
 
-            $rows = Application_Common_Database::prepareAndExecute($sql, [
-                ':show_end1' => $show_end->format(DEFAULT_TIMESTAMP_FORMAT),
-                ':show_end2' => $show_end->format(DEFAULT_TIMESTAMP_FORMAT),
-                ':show_end3' => $show_end->format(DEFAULT_TIMESTAMP_FORMAT),
-            ], 'all');
+            $rows = Application_Common_Database::prepareAndExecute($sql, $params, 'all');
         }
 
         foreach ($rows as $row) {
